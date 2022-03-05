@@ -9,14 +9,16 @@ namespace SnaffCore.Config
         public static Options MyOptions { get; set; }
 
         // Manual Targeting Options
-        public string[] PathTargets { get; set; }
+        public List<string> PathTargets { get; set; } = new List<string>();
         public string[] ComputerTargets { get; set; }
+        public string ComputerTargetsLdapFilter { get; set; } = "(objectClass=computer)";
         public bool ScanSysvol { get; set; } = true;
         public bool ScanNetlogon { get; set; } = true;
         public bool ScanFoundShares { get; set; } = true;
         public int InterestLevel { get; set; } = 0;
         public bool DfsOnly { get; set; } = false;
-        public List<DFSShare> DfsShares { get; set; } = new List<DFSShare>();
+        public bool DfsShareDiscovery { get; set; } = false;
+        public Dictionary<string, string> DfsSharesDict { get; set; } = new Dictionary<string, string>();
         public List<string> DfsNamespacePaths { get; set; } = new List<string>();
         public string CurrentUser { get; set; } = WindowsIdentity.GetCurrent().Name;
 
@@ -41,9 +43,12 @@ namespace SnaffCore.Config
         public bool ShareFinderEnabled { get; set; } = true;
         public string TargetDomain { get; set; }
         public string TargetDc { get; set; }
+        public bool LogDeniedShares { get; set; } = false; 
 
         // FileScanner Options
         public bool DomainUserRules { get; set; } = false;
+        public int DomainUserMinLen { get; set; } = 6;
+        public DomainUserNamesFormat[] DomainUserNameFormats { get; set; } = new DomainUserNamesFormat[] { DomainUserNamesFormat.sAMAccountName };
 
         // passwords to try on certs that require one
         public List<string> CertPasswords = new List<string>()
@@ -66,10 +71,13 @@ namespace SnaffCore.Config
             "changeme",
             "changeit",
             "SolarWinds.R0cks"
-
         };
 
-        public List<string> DomainUserMatchStrings = new List<string>()
+        // initialize a list for this.  We will build it dynamically so don't allow for toml setting
+        public List<string> DomainUsersToMatch = new List<string>();
+
+        // These options can be set in toml. They need the get/set accessor
+        public List<string> DomainUserMatchStrings { get; set; } = new List<string>()
         {
             "sql",
             "svc",
@@ -78,11 +86,19 @@ namespace SnaffCore.Config
             "ccm",
             "scom",
             "opsmgr",
-            "adm"
+            "adm",
+            "MSOL",
+            "adsync",
+            "thycotic",
+            "secretserver",
+            "cyberark",
+            "sccm",
+            "configmgr"
         };
 
-        public List<string> DomainUsersToMatch = new List<string>();
-        public List<string> DomainUsersWordlistRules = new List<string>()
+        public List<string> DomainUserStrictStrings { get; set; } 
+
+        public List<string> DomainUsersWordlistRules { get; set; } = new List<string>()
         {
             "KeepConfigRegexRed"
         };
@@ -102,6 +118,13 @@ namespace SnaffCore.Config
         {
             //PrepareClassifiers();
             //BuildDefaultClassifiers();
+        }
+
+        public enum DomainUserNamesFormat
+        {
+            sAMAccountName,
+            NetBIOS,
+            UPN
         }
     }
 }

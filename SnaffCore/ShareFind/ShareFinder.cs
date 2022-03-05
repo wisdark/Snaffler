@@ -46,8 +46,8 @@ namespace SnaffCore.ShareFind
                         case "SYSVOL":
                             if (MyOptions.ScanSysvol == true)
                             {
-                                //  leave matched as false so that we don't suppress the TreeWalk for the first SYSVOL replica we see
-                                //  toggle the flag so that any other shares replica will be skipped
+                                //  Leave matched as false so that we don't suppress the TreeWalk for the first SYSVOL replica we see.
+                                //  Toggle the flag so that any other shares replica will be skipped
                                 MyOptions.ScanSysvol = false;
                                 break;
                             }
@@ -56,7 +56,7 @@ namespace SnaffCore.ShareFind
                         case "NETLOGON":
                             if (MyOptions.ScanNetlogon == true)
                             {                                
-                                //  same as SYSVOL above
+                                //  Same logic as SYSVOL above
                                 MyOptions.ScanNetlogon = false;
                                 break;
                             }
@@ -81,42 +81,80 @@ namespace SnaffCore.ShareFind
                     // send them to TreeWalker
                     if (!matched)
                     {
-                        bool skip = false;
-                        // check if the thing is in MyOptions.DfsShares and whether we've removed it from MyOptions.DfsNamespacePaths yet.
-                        foreach (DFSShare dfsShare in MyOptions.DfsShares)
+                        // At least one classifier was matched so we will return this share to the results
+                        ShareResult shareResult = new ShareResult()
                         {
-                            if (dfsShare.RemoteServerName.Equals(computer, StringComparison.OrdinalIgnoreCase) &&
-                                dfsShare.Name.Equals(hostShareInfo.shi1_netname, StringComparison.OrdinalIgnoreCase))
+                            Listable = true,
+                            SharePath = shareName,
+                            ShareComment = hostShareInfo.shi1_remark.ToString()
+                        };
+
+                        // Try to find this computer+share in the list of DFS targets
+
+
+                        /*
+                                                foreach (DFSShare dfsShare in MyOptions.DfsShares)
+                                                {
+                                                    ///TODO: Add some logic to match cases where short hostnames is used in DFS target list
+                                                    if (dfsShare.RemoteServerName.Equals(computer, StringComparison.OrdinalIgnoreCase) &&
+                                                        dfsShare.Name.Equals(hostShareInfo.shi1_netname, StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        // why the not operator?   if (!MyOptions.DfsNamespacePaths.Contains(dfsShare.DfsNamespacePath))
+                                                        if (MyOptions.DfsNamespacePaths.Contains(dfsShare.DfsNamespacePath))
+                                                        {
+                                                            // remove the namespace path to make sure we don't kick it off again.
+                                                            MyOptions.DfsNamespacePaths.Remove(dfsShare.DfsNamespacePath);
+                                                            // sub out the \\computer\share path for the dfs namespace path. this makes sure we hit the most efficient endpoint. 
+                                                            shareName = dfsShare.DfsNamespacePath;
+                                                        }
+                                                        else // if that dfs namespace has already been removed from our list, skip further scanning of that share.
+                                                        {
+                                                            skip = true;
+                                                        }
+
+                                                        // Found DFS target matching this computer+share - no further comparisons needed
+                                                        break;
+                                                    }
+                                                }
+                        */
+
+
+                        // If this path can be accessed via DFS
+                        if (MyOptions.DfsSharesDict.ContainsKey(shareName))
+                        {                            
+                            string dfsUncPath = MyOptions.DfsSharesDict[shareName];
+
+                            Mq.Trace(String.Format("Matched host path {0} to DFS {1}",shareName, dfsUncPath));
+
+                            // and if we haven't already scanned this share
+                            if (MyOptions.DfsNamespacePaths.Contains(dfsUncPath))
                             {
-                                if (!MyOptions.DfsNamespacePaths.Contains(dfsShare.DfsNamespacePath))
-                                {
-                                    // remove the namespace path to make sure we don't kick it off again.
-                                    MyOptions.DfsNamespacePaths.Remove(dfsShare.DfsNamespacePath);
-                                    // sub out the \\computer\share path for the dfs namespace path. this makes sure we hit the most efficient endpoint. 
-                                    shareName = dfsShare.DfsNamespacePath;
-                                }
-                                else // if that dfs namespace has already been removed from our list, skip further scanning of that share.
-                                {
-                                    skip = true;
-                                }
+                                Mq.Trace(String.Format("Will scan {0} using DFS referral instead of explicit host", dfsUncPath));
+
+                                // sub out the \\computer\share path for the dfs namespace path. this makes sure we hit the most efficient endpoint. 
+                                shareResult.SharePath = dfsUncPath;
+
+                                // remove the namespace path to make sure we don't kick it off again.
+                                MyOptions.DfsNamespacePaths.Remove(dfsUncPath);
+                            }
+                            else // if that dfs path has already been removed from our list, skip further scanning of that share.
+                            {
+                                // Do we want to report a gray share result for these?  I think not.
+                                // Mq.ShareResult(shareResult);
+                                break;
                             }
                         }
 
-                        if (IsShareReadable(shareName) && skip == false)
-                        {
-                            Triage triage = Triage.Green;
 
-                            ShareResult shareResult = new ShareResult()
-                            {
-                                Listable = true,
-                                Triage = triage,
-                                SharePath = shareName,
-                                ShareComment = hostShareInfo.shi1_remark.ToString()
-                            };
+                        //  If the share is readable then dig deeper.
+                        if (IsShareReadable(shareResult.SharePath))
+                        {
+                            // Share is readable, report as green  (the old default/min of the Triage enum )
+                            shareResult.Triage = Triage.Green;
 
                             try
                             {
-                                DirectoryInfo dirInfo = new DirectoryInfo(shareName);
+                                DirectoryInfo dirInfo = new DirectoryInfo(shareResult.SharePath);
 
                                 //EffectivePermissions.RwStatus rwStatus = effectivePermissions.CanRw(dirInfo);
 
@@ -133,10 +171,8 @@ namespace SnaffCore.ShareFind
                             }
                             catch (System.UnauthorizedAccessException e)
                             {
-                                Mq.Error("Failed to get permissions on " + shareName);
+                                Mq.Error("Failed to get permissions on " + shareResult.SharePath);
                             }
-
-                            Mq.ShareResult(shareResult);
 
                             if (MyOptions.ScanFoundShares)
                             {
@@ -153,7 +189,13 @@ namespace SnaffCore.ShareFind
                                         Mq.Error(e.ToString());
                                     }
                                 });
+
+                                Mq.ShareResult(shareResult);
                             }
+                        }
+                        else if (MyOptions.LogDeniedShares == true)
+                        {
+                            Mq.ShareResult(shareResult);
                         }
                     }
                 }
@@ -203,6 +245,9 @@ namespace SnaffCore.ShareFind
                 //", but this is usually no cause for alarm.");
                 return null;
             }
+
+            Mq.Degub("Share discovered: " + $"\\\\{computer}\\{hostShareInfo.shi1_netname}");
+
             return $"\\\\{computer}\\{hostShareInfo.shi1_netname}";
         }
 
